@@ -1,267 +1,408 @@
+--========================================================
+-- SCRIPT_HUB
+--========================================================
+-- NOTE: This is plain Lua source text. No password or key system.
+-- Intended for a Roblox experience you own/control.
+--========================================================
+
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local TP1 = CFrame.new(-471.13, 32.88, 14.91)
 local TP2 = CFrame.new(546.43, 31.75, -733.14)
 local QZ = CFrame.new(-227.03, 26.39, 390.05)
+
+-- Combined TP: TP1 x6 -> stay 3s -> TP2 x6 -> stay 3s -> repeat
+local TP_COUNT = 6
+local TP_DELAY = 0.05
+local STAY_TIME = 3
+local CombinedTPEnabled = false
+local TPVersion = 0
+
+local function TeleportCombined(TargetCFrame)
+    local Character = Player.Character
+    local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+    if Root then
+        Root.CFrame = TargetCFrame
+        return true
+    end
+    return false
+end
+
+local function WaitTP(MyVersion,Seconds)
+    local EndTime = os.clock() + Seconds
+    while os.clock() < EndTime do
+        if not CombinedTPEnabled or MyVersion ~= TPVersion then return false end
+        task.wait(0.03)
+    end
+    return true
+end
+
+local function SpamTP(TargetCFrame,MyVersion)
+    for _ = 1,TP_COUNT do
+        if not CombinedTPEnabled or MyVersion ~= TPVersion then return false end
+        TeleportCombined(TargetCFrame)
+        task.wait(TP_DELAY)
+    end
+    return true
+end
+
+local function StartCombinedTP()
+    TPVersion += 1
+    local MyVersion = TPVersion
+    task.spawn(function()
+        while CombinedTPEnabled and MyVersion == TPVersion do
+            if not SpamTP(TP1,MyVersion) then return end
+            if not WaitTP(MyVersion,STAY_TIME) then return end
+            if not SpamTP(TP2,MyVersion) then return end
+            if not WaitTP(MyVersion,STAY_TIME) then return end
+        end
+    end)
+end
+
+local function StopCombinedTP()
+    CombinedTPEnabled = false
+    TPVersion += 1
+end
 local SAFE = CFrame.new(2.84, -92.28, -123.06)
 
-local autoHunter = false
-local safeMode = false
-local safeTriggered = false
+local AutoHunter = false
+local AutoSafe = true
+local SafeMode = false
+local SelectedMin = 100
+local SelectedMax = 700
+local SelectedRange = "100-700"
+local CurrentTarget = nil
+local LastSearch = 0
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "HunterHub"
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
+local C = {
+    Background = Color3.fromRGB(12,8,20),
+    Panel = Color3.fromRGB(24,15,38),
+    Panel2 = Color3.fromRGB(38,24,58),
+    Purple = Color3.fromRGB(145,65,255),
+    PurpleDark = Color3.fromRGB(88,35,165),
+    Text = Color3.fromRGB(245,240,255),
+    Muted = Color3.fromRGB(170,155,190),
+    Green = Color3.fromRGB(45,185,95),
+    Red = Color3.fromRGB(190,55,70)
+}
 
-local main = Instance.new("Frame")
-main.Size = UDim2.new(0,230,0,270)
-main.Position = UDim2.new(0.5,-115,0.5,-135)
-main.BackgroundColor3 = Color3.fromRGB(25,25,25)
-main.BorderSizePixel = 0
-main.Parent = gui
+local Old = PlayerGui:FindFirstChild("SCRIPT_HUB")
+if Old then Old:Destroy() end
 
-Instance.new("UICorner",main).CornerRadius = UDim.new(0,10)
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "SCRIPT_HUB"
+Gui.ResetOnSpawn = false
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PlayerGui
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,-40,0,40)
-title.Position = UDim2.new(0,5,0,0)
-title.BackgroundTransparency = 1
-title.Text = "HUNTER HUB"
-title.TextColor3 = Color3.new(1,1,1)
-title.TextSize = 18
-title.Font = Enum.Font.GothamBold
-title.Parent = main
+local Main = Instance.new("Frame")
+Main.Size = UDim2.fromOffset(400,300)
+Main.Position = UDim2.new(.5,-200,.5,-150)
+Main.BackgroundColor3 = C.Background
+Main.BorderSizePixel = 0
+Main.Parent = Gui
+Instance.new("UICorner",Main).CornerRadius = UDim.new(0,14)
 
-local close = Instance.new("TextButton")
-close.Size = UDim2.new(0,30,0,30)
-close.Position = UDim2.new(1,-35,0,5)
-close.BackgroundColor3 = Color3.fromRGB(180,50,50)
-close.Text = "X"
-close.TextColor3 = Color3.new(1,1,1)
-close.TextSize = 16
-close.Font = Enum.Font.GothamBold
-close.Parent = main
+local Border = Instance.new("UIStroke")
+Border.Color = C.Purple
+Border.Thickness = 1.5
+Border.Transparency = .25
+Border.Parent = Main
 
-Instance.new("UICorner",close).CornerRadius = UDim.new(0,7)
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1,0,0,42)
+Header.BackgroundColor3 = C.Panel
+Header.BorderSizePixel = 0
+Header.Parent = Main
+Instance.new("UICorner",Header).CornerRadius = UDim.new(0,14)
 
-local function makeButton(text,y)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1,-20,0,38)
-    b.Position = UDim2.new(0,10,0,y)
-    b.BackgroundColor3 = Color3.fromRGB(55,55,55)
-    b.BorderSizePixel = 0
-    b.Text = text
-    b.TextColor3 = Color3.new(1,1,1)
-    b.TextSize = 14
-    b.Font = Enum.Font.GothamBold
-    b.Parent = main
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,-90,1,0)
+Title.Position = UDim2.fromOffset(14,0)
+Title.BackgroundTransparency = 1
+Title.Text = "SCRIPT_HUB"
+Title.TextColor3 = C.Text
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
 
-    Instance.new("UICorner",b).CornerRadius = UDim.new(0,7)
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.fromOffset(32,30)
+Close.Position = UDim2.new(1,-40,0,9)
+Close.BackgroundColor3 = C.Red
+Close.Text = "X"
+Close.TextColor3 = C.Text
+Close.TextSize = 20
+Close.Font = Enum.Font.GothamBold
+Close.Parent = Header
+Instance.new("UICorner",Close).CornerRadius = UDim.new(0,8)
 
-    return b
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0,112,1,-50)
+Sidebar.Position = UDim2.fromOffset(6,47)
+Sidebar.BackgroundColor3 = C.Panel
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = Main
+Instance.new("UICorner",Sidebar).CornerRadius = UDim.new(0,10)
+
+local Search = Instance.new("TextBox")
+Search.Size = UDim2.new(1,-14,0,32)
+Search.Position = UDim2.fromOffset(7,7)
+Search.BackgroundColor3 = C.Panel2
+Search.Text = ""
+Search.PlaceholderText = "Search..."
+Search.PlaceholderColor3 = C.Muted
+Search.TextColor3 = C.Text
+Search.TextSize = 12
+Search.Font = Enum.Font.Gotham
+Search.ClearTextOnFocus = false
+Search.Parent = Sidebar
+Instance.new("UICorner",Search).CornerRadius = UDim.new(0,7)
+
+local Content = Instance.new("Frame")
+Content.Size = UDim2.new(1,-126,1,-50)
+Content.Position = UDim2.fromOffset(120,47)
+Content.BackgroundColor3 = C.Panel
+Content.BorderSizePixel = 0
+Content.Parent = Main
+Instance.new("UICorner",Content).CornerRadius = UDim.new(0,10)
+
+local Pages, TabButtons = {}, {}
+
+local function NewPage(name)
+    local Page = Instance.new("ScrollingFrame")
+    Page.Name = name
+    Page.Size = UDim2.new(1,-16,1,-16)
+    Page.Position = UDim2.fromOffset(8,8)
+    Page.BackgroundTransparency = 1
+    Page.BorderSizePixel = 0
+    Page.ScrollBarThickness = 3
+    Page.ScrollBarImageColor3 = C.Purple
+    Page.CanvasSize = UDim2.new(0,0,0,0)
+    Page.Visible = false
+    Page.Parent = Content
+
+    local Layout = Instance.new("UIListLayout")
+    Layout.Padding = UDim.new(0,7)
+    Layout.Parent = Page
+    Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        Page.CanvasSize = UDim2.fromOffset(0,Layout.AbsoluteContentSize.Y+15)
+    end)
+
+    Pages[name] = Page
+    return Page
 end
 
-local tp1 = makeButton("TP 1",45)
-local tp2 = makeButton("TP 2",88)
-local qz = makeButton("QUEST / QZ HUNTER",131)
-local hunter = makeButton("AUTO HUNTER: OFF",174)
-local closeButton = makeButton("CLOSE",217)
+local function NewTab(name,icon,y)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1,-14,0,35)
+    Button.Position = UDim2.fromOffset(7,y)
+    Button.BackgroundColor3 = C.Panel
+    Button.BorderSizePixel = 0
+    Button.Text = icon.."  "..name
+    Button.TextColor3 = C.Muted
+    Button.TextSize = 12
+    Button.Font = Enum.Font.GothamBold
+    Button.TextXAlignment = Enum.TextXAlignment.Left
+    Button.Parent = Sidebar
+    Instance.new("UICorner",Button).CornerRadius = UDim.new(0,7)
 
-local open = Instance.new("TextButton")
-open.Size = UDim2.new(0,80,0,38)
-open.Position = UDim2.new(0,15,0,200)
-open.BackgroundColor3 = Color3.fromRGB(45,45,45)
-open.Text = "OPEN"
-open.TextColor3 = Color3.new(1,1,1)
-open.TextSize = 14
-open.Font = Enum.Font.GothamBold
-open.Visible = false
-open.Parent = gui
+    local Page = NewPage(name)
+    TabButtons[name] = Button
 
-Instance.new("UICorner",open).CornerRadius = UDim.new(0,8)
+    Button.Activated:Connect(function()
+        for _,p in pairs(Pages) do p.Visible = false end
+        for _,b in pairs(TabButtons) do
+            b.BackgroundColor3 = C.Panel
+            b.TextColor3 = C.Muted
+        end
+        Page.Visible = true
+        Button.BackgroundColor3 = C.PurpleDark
+        Button.TextColor3 = C.Text
+    end)
 
-local function teleport(cf)
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
+    return Page
+end
 
-    if root then
-        root.CFrame = cf
+local StatusPage = NewTab("Status","STATUS",48)
+local SafePage = NewTab("Safe","SAFE",88)
+local QuestPage = NewTab("Quest","QUEST",128)
+local SettingsPage = NewTab("Settings","SETTINGS",168)
+
+local function Section(Page,text)
+    local L = Instance.new("TextLabel")
+    L.Size = UDim2.new(1,0,0,25)
+    L.BackgroundTransparency = 1
+    L.Text = text
+    L.TextColor3 = C.Purple
+    L.TextSize = 12
+    L.Font = Enum.Font.GothamBold
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.Parent = Page
+end
+
+local function Info(Page,text)
+    local L = Instance.new("TextLabel")
+    L.Size = UDim2.new(1,0,0,40)
+    L.BackgroundColor3 = C.Panel2
+    L.Text = text
+    L.TextColor3 = C.Text
+    L.TextSize = 12
+    L.Font = Enum.Font.Gotham
+    L.Parent = Page
+    Instance.new("UICorner",L).CornerRadius = UDim.new(0,8)
+    return L
+end
+
+local function Button(Page,text)
+    local B = Instance.new("TextButton")
+    B.Size = UDim2.new(1,0,0,38)
+    B.BackgroundColor3 = C.Panel2
+    B.Text = text
+    B.TextColor3 = C.Text
+    B.TextSize = 12
+    B.Font = Enum.Font.GothamBold
+    B.Parent = Page
+    Instance.new("UICorner",B).CornerRadius = UDim.new(0,8)
+    return B
+end
+
+local function Toggle(Page,text,initial,callback)
+    local B = Instance.new("TextButton")
+    B.Size = UDim2.new(1,0,0,40)
+    B.BackgroundColor3 = C.Panel2
+    B.Text = ""
+    B.Parent = Page
+    Instance.new("UICorner",B).CornerRadius = UDim.new(0,8)
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1,-65,1,0)
+    Label.Position = UDim2.fromOffset(12,0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.TextColor3 = C.Text
+    Label.TextSize = 12
+    Label.Font = Enum.Font.GothamBold
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = B
+
+    local Switch = Instance.new("Frame")
+    Switch.Size = UDim2.fromOffset(38,20)
+    Switch.Position = UDim2.new(1,-50,.5,-10)
+    Switch.BackgroundColor3 = Color3.fromRGB(70,60,80)
+    Switch.Parent = B
+    Instance.new("UICorner",Switch).CornerRadius = UDim.new(1,0)
+
+    local Dot = Instance.new("Frame")
+    Dot.Size = UDim2.fromOffset(16,16)
+    Dot.Position = UDim2.fromOffset(2,2)
+    Dot.BackgroundColor3 = C.Text
+    Dot.Parent = Switch
+    Instance.new("UICorner",Dot).CornerRadius = UDim.new(1,0)
+
+    local State = initial
+
+    local function Refresh()
+        if State then
+            Switch.BackgroundColor3 = C.Purple
+            Dot.Position = UDim2.new(1,-18,0,2)
+        else
+            Switch.BackgroundColor3 = Color3.fromRGB(70,60,80)
+            Dot.Position = UDim2.fromOffset(2,2)
+        end
+        callback(State)
     end
+
+    B.Activated:Connect(function()
+        State = not State
+        Refresh()
+    end)
+
+    Refresh()
 end
 
-tp1.MouseButton1Click:Connect(function()
-    teleport(TP1)
-end)
+Section(StatusPage,"HUNTER STATUS")
+local StatusInfo = Info(StatusPage,"Hunter: OFF\nRange: 100-299")
+Section(StatusPage,"TARGET")
+local TargetInfo = Info(StatusPage,"Target: None")
+Section(StatusPage,"PLAYER")
+local HealthInfo = Info(StatusPage,"HP: --")
 
-tp2.MouseButton1Click:Connect(function()
-    teleport(TP2)
-end)
+local function GetLevel(Model)
+    for _,Name in ipairs({"Level","level","NPCLevel","NpcLevel","npcLevel"}) do
+        local Value = Model:GetAttribute(Name)
+        if typeof(Value) == "number" then return Value end
+        if typeof(Value) == "string" then
+            local N = tonumber(Value:match("%d+"))
+            if N then return N end
+        end
+    end
 
-qz.MouseButton1Click:Connect(function()
-    teleport(QZ)
-end)
-
-local function findHunter()
-    for _,obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model")
-        and obj.Name:lower() == "hunter" then
-
-            local root = obj:FindFirstChild("HumanoidRootPart")
-            local hum = obj:FindFirstChildOfClass("Humanoid")
-
-            if root and hum and hum.Health > 0 then
-                return obj
+    for _,Object in ipairs(Model:GetDescendants()) do
+        if Object:IsA("IntValue") or Object:IsA("NumberValue") then
+            local N = Object.Name:lower()
+            if N:find("level") or N == "lv" or N == "lvl" then
+                return tonumber(Object.Value)
             end
         end
+    end
+
+    for _,Object in ipairs(Model:GetDescendants()) do
+        if Object:IsA("TextLabel") or Object:IsA("TextButton") or Object:IsA("TextBox") then
+            for Number in (Object.Text or ""):gmatch("%d+") do
+                local N = tonumber(Number)
+                if N and N >= 10 then return N end
+            end
+        end
+    end
+
+    for Number in Model.Name:gmatch("%d+") do
+        local N = tonumber(Number)
+        if N and N >= 10 then return N end
     end
 
     return nil
 end
 
-hunter.MouseButton1Click:Connect(function()
-    autoHunter = not autoHunter
+local function IsHunter(Model)
+    if not Model:IsA("Model") or Model == Player.Character then return false end
 
-    if autoHunter then
-        hunter.Text = "AUTO HUNTER: ON"
-        hunter.BackgroundColor3 = Color3.fromRGB(40,140,70)
-    else
-        hunter.Text = "AUTO HUNTER: OFF"
-        hunter.BackgroundColor3 = Color3.fromRGB(55,55,55)
-    end
-end)
+    local Humanoid = Model:FindFirstChildOfClass("Humanoid")
+    local Root = Model:FindFirstChild("HumanoidRootPart")
+    if not Humanoid or not Root or Humanoid.Health <= 0 then return false end
 
-RunService.Heartbeat:Connect(function()
+    if Model.Name:lower():find("hunter") then return true end
 
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-
-    if not root or not hum then
-        return
-    end
-
-    if hum.MaxHealth <= 0 then
-        return
-    end
-
-    local hp = hum.Health / hum.MaxHealth
-
-    -- AUTO SAFE ZONE AT 30% HP
-    if hp <= 0.30 and not safeMode then
-
-        safeMode = true
-        safeTriggered = true
-
-        -- SAFE ZONE 4X
-        for i = 1,4 do
-            if root and root.Parent then
-                root.CFrame = SAFE
-            end
-            task.wait(0.08)
-        end
-
-    end
-
-    -- STAY IN SAFE ZONE UNTIL FULL HP
-    if safeMode then
-
-        root.CFrame = SAFE
-
-        -- FULL HP = RETURN TO HUNTER
-        if hp >= 1 then
-            safeMode = false
-            safeTriggered = false
-        else
-            return
+    for _,Object in ipairs(Model:GetDescendants()) do
+        if Object:IsA("TextLabel") or Object:IsA("TextButton") or Object:IsA("TextBox") then
+            if Object.Text and Object.Text:lower():find("hunter") then return true end
         end
     end
 
-    -- AUTO HUNTER
-    if autoHunter then
-
-        local target = findHunter()
-
-        if target then
-
-            local targetRoot =
-                target:FindFirstChild("HumanoidRootPart")
-
-            if targetRoot then
-
-                hum.AutoRotate = false
-
-                root.CFrame =
-                    targetRoot.CFrame * CFrame.new(0,0,6.99)
-
-            end
-        end
-    end
-end)
-
--- CLOSE
-local function hideGui()
-    main.Visible = false
-    open.Visible = true
+    return false
 end
 
-close.MouseButton1Click:Connect(hideGui)
-closeButton.MouseButton1Click:Connect(hideGui)
+local function FindHunter()
+    local Character = Player.Character
+    if not Character then return nil end
+    local Root = Character:FindFirstChild("HumanoidRootPart")
+    if not Root then return nil end
 
--- OPEN
-open.MouseButton1Click:Connect(function()
-    main.Visible = true
-    open.Visible = false
-end)
+    local Best, BestDistance = nil, math.huge
 
--- DRAG
-local dragging = false
-local dragStart = nil
-local startPosition = nil
-
-title.InputBegan:Connect(function(input)
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
-        dragging = true
-        dragStart = input.Position
-        startPosition = main.Position
-
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-
-    if not dragging then
-        return
-    end
-
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
-
-        local delta = input.Position - dragStart
-
-        main.Position = UDim2.new(
-            startPosition.X.Scale,
-            startPosition.X.Offset + delta.X,
-            startPosition.Y.Scale,
-            startPosition.Y.Offset + delta.Y
-        )
-
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
-        dragging = false
-
-    end
-end)
+    for _,Model in ipairs(workspace:GetDescendants()) do
+        if IsHunter(Model) then
+            local Level = GetLevel(Model)
+            if Level and Level >= 100 and Level <= 700 then
+                local NPC_Root = Model:FindFirstChild("HumanoidRootPart")
+                if NPC_Root then
+                    local Distance = (NPC_Root.Position-Root.Position).Magnitude
+                    if Distance < BestDistance then
+                        BestDistance
