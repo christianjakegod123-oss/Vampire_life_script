@@ -405,4 +405,215 @@ local function FindHunter()
                 if NPC_Root then
                     local Distance = (NPC_Root.Position-Root.Position).Magnitude
                     if Distance < BestDistance then
-                        BestDistance
+                        BestDistance, Best = Distance, Model
+                    end
+                end
+            end
+        end
+    end
+
+    return Best
+end
+
+Section(SafePage,"AUTO SAFE")
+Toggle(SafePage,"Auto Safe at 30% HP",true,function(State)
+    AutoSafe = State
+end)
+Info(SafePage,"30% HP -> SAFE\nFull HP -> resume Hunter")
+
+Section(QuestPage,"QUEST / QZ")
+
+Info(QuestPage,"QUIZ 1 - TP 1 / 2\nTP1 x6 -> wait 3s -> TP2 x6 -> wait 3s -> repeat")
+
+local Tutorial = Instance.new("TextLabel")
+Tutorial.Size = UDim2.new(1,0,0,84)
+Tutorial.BackgroundColor3 = C.Panel2
+Tutorial.Text = "TUTORIAL\n1. Open the game's Settings.\n2. Turn ON Auto Quest.\n3. Turn ON TP 1 / 2.\n4. TP1 x6 -> wait 3s.\n5. TP2 x6 -> wait 3s.\n6. Repeat while ON."
+Tutorial.TextColor3 = C.Text
+Tutorial.TextSize = 11
+Tutorial.Font = Enum.Font.Gotham
+Tutorial.TextWrapped = true
+Tutorial.TextXAlignment = Enum.TextXAlignment.Left
+Tutorial.Parent = QuestPage
+Instance.new("UICorner",Tutorial).CornerRadius = UDim.new(0,8)
+
+local Quiz1TP = Button(QuestPage,"1 - TP 1 / 2: OFF")
+local Quiz2Hunter = Button(QuestPage,"2 - HUNTER: OFF")
+
+Quiz1TP.Activated:Connect(function()
+    if CombinedTPEnabled then
+        StopCombinedTP()
+        Quiz1TP.Text = "1 - TP 1 / 2: OFF"
+        Quiz1TP.BackgroundColor3 = C.Panel2
+    else
+        CombinedTPEnabled = true
+        Quiz1TP.Text = "1 - TP 1 / 2: ON"
+        Quiz1TP.BackgroundColor3 = C.Purple
+        StartCombinedTP()
+    end
+end)
+
+Quiz2Hunter.Activated:Connect(function()
+    AutoHunter = not AutoHunter
+
+    if AutoHunter then
+        Quiz2Hunter.Text = "2 - HUNTER: ON"
+        Quiz2Hunter.BackgroundColor3 = C.Purple
+        StatusInfo.Text = "Hunter: ON\nRange: Level 100-700"
+    else
+        Quiz2Hunter.Text = "2 - HUNTER: OFF"
+        Quiz2Hunter.BackgroundColor3 = C.Panel2
+        local Character = Player.Character
+        local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+        if Humanoid then Humanoid.AutoRotate = true end
+        StatusInfo.Text = "Hunter: OFF\nRange: Level 100-700"
+    end
+end)
+
+Section(SettingsPage,"SETTINGS")
+Info(SettingsPage,"SCRIPT_HUB\nMobile Edition\nQUIZ 1 = TP 1 / 2\nQUIZ 2 = HUNTER ON / OFF")
+Info(SettingsPage,"Hunter range: Level 100-700\nTP cycle: 6x + 3s each location")
+
+local function GoSafe(Root)
+    SafeMode = true
+    CurrentTarget = nil
+    for _ = 1,4 do
+        if Root and Root.Parent then Root.CFrame = SAFE end
+        task.wait(0.08)
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    local Character = Player.Character
+    if not Character then return end
+
+    local Root = Character:FindFirstChild("HumanoidRootPart")
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    if not Root or not Humanoid or Humanoid.MaxHealth <= 0 then return end
+
+    local HP = Humanoid.Health/Humanoid.MaxHealth
+    HealthInfo.Text = "HP: "..math.floor(Humanoid.Health).." / "..math.floor(Humanoid.MaxHealth)
+
+    if AutoSafe and HP <= .30 and not SafeMode then GoSafe(Root) end
+
+    if SafeMode then
+        Root.CFrame = SAFE
+        if HP >= .99 then
+            SafeMode = false
+            CurrentTarget = nil
+        else
+            return
+        end
+    end
+
+    if AutoHunter then
+        if not CurrentTarget or not CurrentTarget.Parent or os.clock()-LastSearch > .25 then
+            CurrentTarget = FindHunter()
+            LastSearch = os.clock()
+        end
+
+        if CurrentTarget then
+            local TargetRoot = CurrentTarget:FindFirstChild("HumanoidRootPart")
+            local TargetHumanoid = CurrentTarget:FindFirstChildOfClass("Humanoid")
+
+            if TargetRoot and TargetHumanoid and TargetHumanoid.Health > 0 then
+                Humanoid.AutoRotate = false
+                Root.CFrame = TargetRoot.CFrame*CFrame.new(0,0,6.99)
+
+                TargetInfo.Text =
+                    "Target: "..CurrentTarget.Name..
+                    "\nLevel: "..(GetLevel(CurrentTarget) or "?")
+            else
+                CurrentTarget = nil
+            end
+        else
+            TargetInfo.Text = "Target: No Hunter Found"
+        end
+    else
+        Humanoid.AutoRotate = true
+        TargetInfo.Text = "Target: None"
+    end
+end)
+
+for _,Page in pairs(Pages) do Page.Visible = false end
+StatusPage.Visible = true
+TabButtons["Status"].BackgroundColor3 = C.Purple
+TabButtons["Status"].TextColor3 = C.Text
+
+--========================================================
+-- X + OPEN ONLY
+--========================================================
+
+local Open = Instance.new("TextButton")
+Open.Name = "OpenButton"
+Open.Size = UDim2.fromOffset(80,38)
+Open.Position = UDim2.fromOffset(15,200)
+Open.BackgroundColor3 = C.Purple
+Open.Text = "OPEN"
+Open.TextColor3 = C.Text
+Open.TextSize = 13
+Open.Font = Enum.Font.GothamBold
+Open.Visible = false
+Open.ZIndex = 100
+Open.Parent = Gui
+Instance.new("UICorner",Open).CornerRadius = UDim.new(0,9)
+
+Close.Activated:Connect(function()
+    Main.Visible = false
+    Open.Visible = true
+end)
+
+Open.Activated:Connect(function()
+    Main.Visible = true
+    Open.Visible = false
+end)
+
+--========================================================
+-- MOBILE DRAG
+--========================================================
+
+local Dragging = false
+local DragStart
+local StartPosition
+
+Header.InputBegan:Connect(function(Input)
+    if Input.UserInputType == Enum.UserInputType.Touch
+    or Input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Dragging = true
+        DragStart = Input.Position
+        StartPosition = Main.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(Input)
+    if not Dragging then return end
+
+    if Input.UserInputType == Enum.UserInputType.Touch
+    or Input.UserInputType == Enum.UserInputType.MouseMovement then
+        local Delta = Input.Position-DragStart
+        Main.Position = UDim2.new(
+            StartPosition.X.Scale,
+            StartPosition.X.Offset+Delta.X,
+            StartPosition.Y.Scale,
+            StartPosition.Y.Offset+Delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(Input)
+    if Input.UserInputType == Enum.UserInputType.Touch
+    or Input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Dragging = false
+    end
+end)
+
+Player.CharacterAdded:Connect(function()
+    CurrentTarget = nil
+    SafeMode = false
+    task.wait(1)
+
+    local Humanoid = Player.Character:FindFirstChildOfClass("Humanoid")
+    if Humanoid then Humanoid.AutoRotate = true end
+end)
+
+print("SCRIPT_HUB LOADED")
